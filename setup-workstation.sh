@@ -1,16 +1,10 @@
 #!/bin/bash
 set -e
 
-# Disable unattended upgrades
-echo "Disabling unattended-upgrades..."
-sudo systemctl stop unattended-upgrades
-sudo systemctl disable unattended-upgrades
-sudo apt remove -y unattended-upgrades
-
 # Update system and install prerequisites
 echo "Updating system and installing prerequisites..."
 sudo apt update && sudo apt upgrade -y
-sudo apt install -y curl software-properties-common flatpak gnome-software-plugin-flatpak
+sudo apt install -y curl software-properties-common flatpak gnome-software-plugin-flatpak dconf-cli
 
 # Add Flatpak repository
 sudo flatpak remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
@@ -36,55 +30,34 @@ curl -L -o /tmp/010editor.deb "https://www.sweetscape.com/download/010EditorLinu
 sudo dpkg -i /tmp/010editor.deb || sudo apt --fix-broken install -y
 rm /tmp/010editor.deb
 
+# Install Human theme for MATE (for old Ubuntu look), classic icon sets, cursors, and fonts
+echo "Installing Human theme, classic icons, cursor themes, and fonts for MATE..."
+sudo apt install -y mate-themes human-icon-theme gnome-icon-theme dmz-cursor-theme fonts-ubuntu fonts-liberation
+
+# Ensure mate-settings-daemon is running before applying changes
+if ! pgrep -x "mate-settings-daemon" > /dev/null; then
+    echo "Starting mate-settings-daemon..."
+    nohup mate-settings-daemon &
+    sleep 3
+fi
+
+# Set Human theme, icons, cursors, and fonts as default
+gsettings set org.mate.interface gtk-theme "Human"
+gsettings set org.mate.Marco.general theme "Human"
+gsettings set org.mate.interface icon-theme "human"
+gsettings set org.mate.background picture-filename "/usr/share/backgrounds/warty-final-ubuntu.png"
+gsettings set org.mate.interface cursor-theme "DMZ-White"
+gsettings set org.mate.interface font-name "Ubuntu 11"
+gsettings set org.mate.desktop.interface document-font-name "Liberation Sans 10"
+gsettings set org.mate.desktop.interface monospace-font-name "Ubuntu Mono 12"
+
+# Configure a classic two-panel layout with applets
+dconf load /org/mate/panel/ < /usr/share/mate-panel/layouts/classic.layout
+
 # Edit GRUB to boot Xanmod kernel entry by default with 7s timeout
 sudo sed -i 's/^GRUB_TIMEOUT=.*/GRUB_TIMEOUT=7/' /etc/default/grub
 sudo sed -i 's/^GRUB_DEFAULT=.*/GRUB_DEFAULT=0/' /etc/default/grub
 sudo update-grub
-
-# Create custom updater script
-cat << 'EOF' | sudo tee /usr/local/bin/system_auto_update.sh
-#!/bin/bash
-set -e
-
-# Stop libvirtd gracefully if running
-if systemctl is-active --quiet libvirtd; then
-  systemctl stop libvirtd
-fi
-
-apt update && apt full-upgrade -y
-if [ -f /var/run/reboot-required ]; then
-  reboot
-fi
-EOF
-sudo chmod +x /usr/local/bin/system_auto_update.sh
-
-# Create systemd service for updater
-sudo tee /etc/systemd/system/system-auto-update.service > /dev/null << 'EOF'
-[Unit]
-Description=System Auto Update
-After=multi-user.target
-
-[Service]
-Type=oneshot
-ExecStart=/usr/local/bin/system_auto_update.sh
-EOF
-
-# Create systemd timer to run at every boot
-sudo tee /etc/systemd/system/system-auto-update.timer > /dev/null << 'EOF'
-[Unit]
-Description=Run system auto-update at boot
-
-[Timer]
-OnBootSec=2min
-Unit=system-auto-update.service
-
-[Install]
-WantedBy=timers.target
-EOF
-
-sudo systemctl daemon-reexec
-sudo systemctl daemon-reload
-sudo systemctl enable --now system-auto-update.timer
 
 echo "Setup completed. Rebooting in 5 seconds..."
 sleep 5
